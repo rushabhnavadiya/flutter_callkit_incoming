@@ -7,7 +7,6 @@
 
 package com.hiennv.flutter_callkit_incoming
 
-import android.app.Activity
 import android.app.KeyguardManager
 import android.app.NotificationManager
 import android.content.BroadcastReceiver
@@ -28,11 +27,17 @@ import android.view.View
 import android.view.Window
 import android.view.WindowManager
 import android.view.animation.AnimationUtils
+import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RelativeLayout
 import android.widget.TextView
-import com.hiennv.flutter_callkit_incoming.widgets.RippleRelativeLayout
-import de.hdodenhof.circleimageview.CircleImageView
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.button.MaterialButton
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.view.animation.LinearInterpolator
 import kotlin.math.abs
 import android.view.ViewGroup.MarginLayoutParams
 import android.os.PowerManager
@@ -40,7 +45,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 
-class CallkitIncomingActivity : Activity() {
+class CallkitIncomingActivity : AppCompatActivity() {
 
     companion object {
 
@@ -83,20 +88,22 @@ class CallkitIncomingActivity : Activity() {
 
     private var endedCallkitIncomingBroadcastReceiver = EndedCallkitIncomingBroadcastReceiver()
 
-    private lateinit var ivBackground: ImageView
-    private lateinit var llBackgroundAnimation: RippleRelativeLayout
-
-    private lateinit var tvNameCaller: TextView
-    private lateinit var tvNumber: TextView
-    private lateinit var ivLogo: ImageView
-    private lateinit var ivAvatar: CircleImageView
-
-    private lateinit var llAction: LinearLayout
-    private lateinit var ivAcceptCall: ImageView
-    private lateinit var tvAccept: TextView
-
-    private lateinit var ivDeclineCall: ImageView
-    private lateinit var tvDecline: TextView
+    private lateinit var tvGroupAvatar: TextView
+    private lateinit var tvGroupName: TextView
+    private lateinit var tvMainMessage: TextView
+    private lateinit var tvSubMessage: TextView
+    private lateinit var tvPriorityLabel: TextView
+    private lateinit var tvSenderFooter: TextView
+    private lateinit var btnViewDetails: MaterialButton
+    private lateinit var btnIgnore: MaterialButton
+    private lateinit var ringIconWrap: FrameLayout
+    private lateinit var pulseRingOuter: View
+    private lateinit var pulseRingMiddle: View
+    private lateinit var pulseRingInner: View
+    private lateinit var pulseAnimatorSet: AnimatorSet
+    private var outerAnimatorSet: AnimatorSet? = null
+    private lateinit var bgGlow: View
+    private var bgGlowAnimator: ObjectAnimator? = null
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -202,97 +209,60 @@ class CallkitIncomingActivity : Activity() {
             }
         }
 
-        val textColor = data?.getString(CallkitConstants.EXTRA_CALLKIT_TEXT_COLOR, "#ffffff")
-        val isShowCallID = data?.getBoolean(CallkitConstants.EXTRA_CALLKIT_IS_SHOW_CALL_ID, false)
-        tvNameCaller.text = data?.getString(CallkitConstants.EXTRA_CALLKIT_NAME_CALLER, "")
-        tvNumber.text = data?.getString(CallkitConstants.EXTRA_CALLKIT_HANDLE, "")
-        tvNumber.visibility = if (isShowCallID == true) View.VISIBLE else View.INVISIBLE
-
-        try {
-            tvNameCaller.setTextColor(Color.parseColor(textColor))
-            tvNumber.setTextColor(Color.parseColor(textColor))
-        } catch (error: Exception) {
+        val groupName = data?.getString(CallkitConstants.EXTRA_CALLKIT_NAME_CALLER, "Group") ?: "Group"
+        val mainMessage = data?.getString(CallkitConstants.EXTRA_CALLKIT_HANDLE, "ALERT") ?: "ALERT"
+        
+        val extra = data?.getSerializable(CallkitConstants.EXTRA_CALLKIT_EXTRA) as? Map<*, *>
+        
+        var groupInitials = extra?.get("groupInitials") as? String ?: ""
+        if (groupInitials.isEmpty()) {
+            groupInitials = groupName.take(2).uppercase()
+        }
+        
+        var subMessage = extra?.get("extraSubMessage") as? String ?: ""
+        if (subMessage.isEmpty()) {
+            subMessage = "Tap View Details to see more."
+        }
+        
+        var priorityLabel = extra?.get("extraPriorityLabel") as? String ?: ""
+        if (priorityLabel.isEmpty()) {
+            priorityLabel = "CRITICAL"
+        }
+        
+        var senderFooter = extra?.get("extraSenderFooter") as? String ?: ""
+        if (senderFooter.isEmpty()) {
+            senderFooter = "Sent by Tapp"
         }
 
-        val isShowLogo = data?.getBoolean(CallkitConstants.EXTRA_CALLKIT_IS_SHOW_LOGO, false)
-        ivLogo.visibility = if (isShowLogo == true) View.VISIBLE else View.INVISIBLE
-        var logoUrl = data?.getString(CallkitConstants.EXTRA_CALLKIT_LOGO_URL, "")
-        if (!logoUrl.isNullOrEmpty()) {
-            if (!logoUrl.startsWith("http://", true) && !logoUrl.startsWith("https://", true)) {
-                logoUrl = String.format("file:///android_asset/flutter_assets/%s", logoUrl)
-            }
-            val headers =
-                data?.getSerializable(CallkitConstants.EXTRA_CALLKIT_HEADERS) as HashMap<String, Any?>
-            ImageLoaderProvider.loadImage(this@CallkitIncomingActivity, logoUrl, headers, R.drawable.transparent, ivLogo)
+        tvGroupAvatar.text = groupInitials
+        tvGroupName.text = groupName
+        tvMainMessage.text = mainMessage
+        tvSubMessage.text = subMessage
+        tvPriorityLabel.text = priorityLabel
+
+        // Formatting sender footer with SpannableStringBuilder to match mockup exactly
+        val prefix = "Sent by "
+        if (senderFooter.startsWith(prefix)) {
+            val name = senderFooter.substring(prefix.length)
+            val spannable = android.text.SpannableStringBuilder()
+                .append(prefix, android.text.style.ForegroundColorSpan(Color.parseColor("#6E6E6E")), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                .append(name, android.text.style.ForegroundColorSpan(Color.parseColor("#FFFFFF")), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            
+            spannable.setSpan(
+                android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                prefix.length,
+                spannable.length,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            tvSenderFooter.text = spannable
+        } else {
+            tvSenderFooter.text = senderFooter
         }
 
-        var avatarUrl = data?.getString(CallkitConstants.EXTRA_CALLKIT_AVATAR, "")
-        if (!avatarUrl.isNullOrEmpty()) {
-            ivAvatar.visibility = View.VISIBLE
-            if (!avatarUrl.startsWith("http://", true) && !avatarUrl.startsWith("https://", true)) {
-                avatarUrl = String.format("file:///android_asset/flutter_assets/%s", avatarUrl)
-            }
-            val headers =
-                data?.getSerializable(CallkitConstants.EXTRA_CALLKIT_HEADERS) as HashMap<String, Any?>
-            ImageLoaderProvider.loadImage(this@CallkitIncomingActivity, avatarUrl, headers, R.drawable.ic_default_avatar, ivAvatar)
-        }
-
-        val callType = data?.getInt(CallkitConstants.EXTRA_CALLKIT_TYPE, 0) ?: 0
-        if (callType > 0) {
-            ivAcceptCall.setImageResource(R.drawable.ic_video)
-        }
         val duration = data?.getLong(CallkitConstants.EXTRA_CALLKIT_DURATION, 0L) ?: 0L
         wakeLockRequest(duration)
 
         finishTimeout(data, duration)
-
-        val textAccept = data?.getString(CallkitConstants.EXTRA_CALLKIT_TEXT_ACCEPT, "")
-        tvAccept.text =
-            if (TextUtils.isEmpty(textAccept)) getString(R.string.text_accept) else textAccept
-        val textDecline = data?.getString(CallkitConstants.EXTRA_CALLKIT_TEXT_DECLINE, "")
-        tvDecline.text =
-            if (TextUtils.isEmpty(textDecline)) getString(R.string.text_decline) else textDecline
-
-        val acceptCallColor =
-            data?.getString(CallkitConstants.EXTRA_CALLKIT_ACCEPT_COLOR, "#4CAF50")
-        try {
-            ivAcceptCall.setBackground(AppUtils.createCircleDrawable(Color.parseColor(acceptCallColor)))
-        } catch (error: Exception) {
-        }
-
-        val declineCallColor =
-            data?.getString(CallkitConstants.EXTRA_CALLKIT_DECLINE_COLOR, "#F44336")
-        try {
-            ivDeclineCall.setBackground(AppUtils.createCircleDrawable(Color.parseColor(declineCallColor)))
-        } catch (error: Exception) {
-        }
-
-        try {
-            tvAccept.setTextColor(Color.parseColor(textColor))
-            tvDecline.setTextColor(Color.parseColor(textColor))
-        } catch (error: Exception) {
-        }
-
-        val backgroundColor =
-            data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_COLOR, "#0955fa")
-        try {
-            ivBackground.setBackgroundColor(Color.parseColor(backgroundColor))
-        } catch (error: Exception) {
-        }
-        var backgroundUrl = data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_URL, "")
-        if (!backgroundUrl.isNullOrEmpty()) {
-            if (!backgroundUrl.startsWith("http://", true) && !backgroundUrl.startsWith(
-                    "https://",
-                    true
-                )
-            ) {
-                backgroundUrl =
-                    String.format("file:///android_asset/flutter_assets/%s", backgroundUrl)
-            }
-            val headers =
-                data?.getSerializable(CallkitConstants.EXTRA_CALLKIT_HEADERS) as HashMap<String, Any?>
-            ImageLoaderProvider.loadImage(this@CallkitIncomingActivity, backgroundUrl, headers, R.drawable.transparent, ivBackground)
-        }
     }
 
     private fun finishTimeout(data: Bundle?, duration: Long) {
@@ -304,47 +274,95 @@ class CallkitIncomingActivity : Activity() {
         val timeOut = duration - abs(currentSystemTime - timeStartCall)
         Handler(Looper.getMainLooper()).postDelayed({
             if (!isFinishing) {
+                val intent = CallkitIncomingBroadcastReceiver.getIntentTimeout(this@CallkitIncomingActivity, data)
+                sendBroadcast(intent)
                 finishTask()
             }
         }, timeOut)
     }
 
     private fun initView() {
-        ivBackground = findViewById(R.id.ivBackground)
-        llBackgroundAnimation = findViewById(R.id.llBackgroundAnimation)
-        llBackgroundAnimation.layoutParams.height =
-            Utils.getScreenWidth() + Utils.getStatusBarHeight(this@CallkitIncomingActivity)
-        llBackgroundAnimation.startRippleAnimation()
+        tvGroupAvatar = findViewById(R.id.tv_group_avatar)
+        tvGroupName = findViewById(R.id.tv_group_name)
+        tvMainMessage = findViewById(R.id.tv_main_message)
+        tvSubMessage = findViewById(R.id.tv_sub_message)
+        tvPriorityLabel = findViewById(R.id.tv_priority_label)
+        tvSenderFooter = findViewById(R.id.tv_sender_footer)
+        btnViewDetails = findViewById(R.id.btn_view_details)
+        btnIgnore = findViewById(R.id.btn_ignore)
+        ringIconWrap = findViewById(R.id.ring_icon_wrap)
+        pulseRingOuter = findViewById(R.id.pulse_ring_outer)
+        pulseRingMiddle = findViewById(R.id.pulse_ring_middle)
+        pulseRingInner = findViewById(R.id.pulse_ring_inner)
+        bgGlow = findViewById(R.id.bg_glow)
 
-        tvNameCaller = findViewById(R.id.tvNameCaller)
-        tvNumber = findViewById(R.id.tvNumber)
-        ivLogo = findViewById(R.id.ivLogo)
-        ivAvatar = findViewById(R.id.ivAvatar)
+        startRingPulseAnimation()
+        startBackgroundGlowAnimation()
 
-        llAction = findViewById(R.id.llAction)
-
-        val params = llAction.layoutParams as MarginLayoutParams
-        params.setMargins(0, 0, 0, Utils.getNavigationBarHeight(this@CallkitIncomingActivity))
-        llAction.layoutParams = params
-
-        ivAcceptCall = findViewById(R.id.ivAcceptCall)
-        tvAccept = findViewById(R.id.tvAccept)
-        ivDeclineCall = findViewById(R.id.ivDeclineCall)
-        tvDecline = findViewById(R.id.tvDecline)
-        animateAcceptCall()
-
-        ivAcceptCall.setOnClickListener {
+        btnViewDetails.setOnClickListener {
             onAcceptClick()
         }
-        ivDeclineCall.setOnClickListener {
+        btnIgnore.setOnClickListener {
+            onDeclineClick()
+        }
+        val btnClose: ImageButton = findViewById(R.id.btn_close)
+        btnClose.setOnClickListener {
             onDeclineClick()
         }
     }
 
-    private fun animateAcceptCall() {
-        val shakeAnimation =
-            AnimationUtils.loadAnimation(this@CallkitIncomingActivity, R.anim.shake_anim)
-        ivAcceptCall.animation = shakeAnimation
+    private fun startBackgroundGlowAnimation() {
+        bgGlowAnimator = ObjectAnimator.ofFloat(bgGlow, "alpha", 0.5f, 1.0f).apply {
+            duration = 2000 // Slow ambient breathe
+            repeatCount = ObjectAnimator.INFINITE
+            repeatMode = ObjectAnimator.REVERSE
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+        }
+        bgGlowAnimator?.start()
+    }
+
+    private fun startRingPulseAnimation() {
+        // Middle ring animators (scale and fade)
+        val middleScaleX = ObjectAnimator.ofFloat(pulseRingMiddle, "scaleX", 1.0f, 1.8f)
+        val middleScaleY = ObjectAnimator.ofFloat(pulseRingMiddle, "scaleY", 1.0f, 1.8f)
+        val middleAlpha = ObjectAnimator.ofFloat(pulseRingMiddle, "alpha", 1.0f, 0.0f)
+        
+        pulseAnimatorSet = AnimatorSet().apply {
+            playTogether(middleScaleX, middleScaleY, middleAlpha)
+            duration = 1200
+            interpolator = LinearInterpolator()
+        }
+        pulseAnimatorSet.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                if (!isFinishing) pulseAnimatorSet.start()
+            }
+        })
+        pulseAnimatorSet.start()
+
+        // Outer ring animators (scale and fade) started with delay
+        val outerScaleX = ObjectAnimator.ofFloat(pulseRingOuter, "scaleX", 1.0f, 1.8f)
+        val outerScaleY = ObjectAnimator.ofFloat(pulseRingOuter, "scaleY", 1.0f, 1.8f)
+        val outerAlpha = ObjectAnimator.ofFloat(pulseRingOuter, "alpha", 1.0f, 0.0f)
+        
+        val outerAnim = AnimatorSet().apply {
+            playTogether(outerScaleX, outerScaleY, outerAlpha)
+            duration = 1200
+            interpolator = LinearInterpolator()
+        }
+        outerAnim.addListener(object : android.animation.AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                if (!isFinishing) outerAnim.start()
+            }
+        })
+
+        // Start the second wave 600ms after the first
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!isFinishing) {
+                outerAnim.start()
+            }
+        }, 600)
+
+        this.outerAnimatorSet = outerAnim
     }
 
 
@@ -400,6 +418,11 @@ class CallkitIncomingActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (::pulseAnimatorSet.isInitialized) {
+            pulseAnimatorSet.cancel()
+        }
+        outerAnimatorSet?.cancel()
+        bgGlowAnimator?.cancel()
         unregisterReceiver(endedCallkitIncomingBroadcastReceiver)
         super.onDestroy()
     }
